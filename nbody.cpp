@@ -2,6 +2,7 @@
 #include <fstream>
 #include <random>
 #include <cmath>
+#include "cuda_kernel.h"
 
 double G = 6.674*std::pow(10,-11);
 //double G = 1;
@@ -192,8 +193,67 @@ int main(int argc, char* argv[]) {
   size_t nbstep = std::atol(argv[3]);
   size_t printevery = std::atol(argv[4]);
   
+  size_t nbpart = std::atol(argv[1]);
   
-  simulation s(1);
+  simulation s(nbpart);
+
+  // Device pointers
+  double *d_mass, *d_x, *d_y, *d_z, *d_vx, *d_vy, *d_vz, *d_fx, *d_fy, *d_fz;
+  size_t bytes = nbpart * sizeof(double);
+
+  cudaMalloc(&d_mass, bytes);
+  cudaMalloc(&d_x, bytes);
+  cudaMalloc(&d_y, bytes);
+  cudaMalloc(&d_z, bytes);
+  cudaMalloc(&d_vx, bytes);
+  cudaMalloc(&d_vy, bytes);
+  cudaMalloc(&d_vz, bytes);
+  cudaMalloc(&d_fx, bytes);
+  cudaMalloc(&d_fy, bytes);
+  cudaMalloc(&d_fz, bytes);
+
+  cudaMemcpy(d_mass, sim.mass.data(), bytes, cudaMemcpyHostToDevice);
+  cudaMemcpy(d_x, sim.x.data(), bytes, cudaMemcpyHostToDevice);
+  cudaMemcpy(d_y, sim.y.data(), bytes, cudaMemcpyHostToDevice);
+  cudaMemcpy(d_z, sim.z.data(), bytes, cudaMemcpyHostToDevice);
+  cudaMemcpy(d_vx, sim.vx.data(), bytes, cudaMemcpyHostToDevice);
+  cudaMemcpy(d_vy, sim.vy.data(), bytes, cudaMemcpyHostToDevice);
+  cudaMemcpy(d_vz, sim.vz.data(), bytes, cudaMemcpyHostToDevice);
+
+  for (size_t step = 0; step < nbstep; ++step) {
+    if (step % printevery == 0)
+        dump_state(sim);
+
+    int blockSize = 256;
+    int numBlocks = (nb + blockSize - 1) / blockSize;
+    calculate_forces<<<numBlocks, blockSize>>>(d_mass, d_x, d_y, d_z, d_fx, d_fy, d_fz, nb, G);
+    cudaDeviceSynchronize();
+
+    update_positions_velocities<<<numBlocks, blockSize>>>(d_mass, d_x, d_y, d_z, d_vx, d_vy, d_vz, d_fx, d_fy, d_fz, nb, dt);
+    cudaDeviceSynchronize();
+}
+
+  cudaMemcpy(sim.fx.data(), d_fx, bytes, cudaMemcpyDeviceToHost);
+  cudaMemcpy(sim.fy.data(), d_fy, bytes, cudaMemcpyDeviceToHost);
+  cudaMemcpy(sim.fz.data(), d_fz, bytes, cudaMemcpyDeviceToHost);
+  cudaMemcpy(sim.vx.data(), d_vx, bytes, cudaMemcpyDeviceToHost);
+  cudaMemcpy(sim.vy.data(), d_vy, bytes, cudaMemcpyDeviceToHost);
+  cudaMemcpy(sim.vz.data(), d_vz, bytes, cudaMemcpyDeviceToHost);
+  cudaMemcpy(sim.x.data(), d_x, bytes, cudaMemcpyDeviceToHost);
+  cudaMemcpy(sim.y.data(), d_y, bytes, cudaMemcpyDeviceToHost);
+  cudaMemcpy(sim.z.data(), d_z, bytes, cudaMemcpyDeviceToHost);
+
+  cudaFree(d_mass);
+  cudaFree(d_x);
+  cudaFree(d_y);
+  cudaFree(d_z);
+  cudaFree(d_vx);
+  cudaFree(d_vy);
+  cudaFree(d_vz);
+  cudaFree(d_fx);
+  cudaFree(d_fy);
+  cudaFree(d_fz);
+
 
   //parse command line
   {
